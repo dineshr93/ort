@@ -25,6 +25,8 @@ import com.github.ajalt.mordant.rendering.Theme
 import java.io.File
 import java.lang.reflect.Modifier
 
+import kotlin.reflect.full.companionObjectInstance
+
 import org.apache.logging.log4j.kotlin.logger
 
 import org.ossreviewtoolkit.analyzer.PackageManager
@@ -35,6 +37,7 @@ import org.ossreviewtoolkit.plugins.commands.api.OrtCommand
 import org.ossreviewtoolkit.scanner.CommandLinePathScannerWrapper
 import org.ossreviewtoolkit.scanner.ScannerWrapperConfig
 import org.ossreviewtoolkit.utils.common.CommandLineTool
+import org.ossreviewtoolkit.utils.common.Plugin
 import org.ossreviewtoolkit.utils.spdx.scanCodeLicenseTextDir
 
 import org.reflections.Reflections
@@ -51,7 +54,11 @@ class RequirementsCommand : OrtCommand(
     help = "Check for the command line tools required by ORT."
 ) {
     override fun run() {
-        val statusCode = checkToolVersions()
+        val reflections = Reflections("org.ossreviewtoolkit", Scanners.SubTypes)
+
+        listPlugins(reflections)
+
+        val statusCode = checkToolVersions(reflections)
 
         echo("Prefix legend:")
         echo("${DANGER_PREFIX}The tool was not found in the PATH environment.")
@@ -72,11 +79,11 @@ class RequirementsCommand : OrtCommand(
         }
     }
 
-    private fun checkToolVersions(): Int {
+    private fun checkToolVersions(reflections: Reflections): Int {
         // Toggle bits in here to denote the kind of error. Skip the first bit as status code 1 is already used above.
         var statusCode = 0
 
-        getToolsByCategory().forEach { (category, tools) ->
+        getToolsByCategory(reflections).forEach { (category, tools) ->
             echo(Theme.Default.info("${category}s:"))
 
             tools.forEach { tool ->
@@ -141,8 +148,27 @@ class RequirementsCommand : OrtCommand(
         return statusCode
     }
 
-    private fun getToolsByCategory(): Map<String, List<CommandLineTool>> {
-        val reflections = Reflections("org.ossreviewtoolkit", Scanners.SubTypes)
+    private fun listPlugins(reflections: Reflections) {
+        val pluginClasses = reflections.getSubTypesOf(Plugin::class.java)
+
+        val pluginTypes = pluginClasses.mapNotNull { clazz ->
+            val companion = clazz.declaredClasses.find { it.name.endsWith("\$Companion") }
+            val all = runCatching { companion?.getDeclaredMethod("getALL") }.getOrNull()
+
+            all?.let {
+                @Suppress("UNCHECKED_CAST")
+                val plugins = all.invoke(clazz.kotlin.companionObjectInstance) as Map<String, *>
+                clazz.simpleName to plugins.keys
+            }
+        }
+
+        pluginTypes.forEach { (name, all) ->
+            println("$name plugins:")
+            println(all.joinToString("\n", postfix = "\n") { "\t * $it" })
+        }
+    }
+
+    private fun getToolsByCategory(reflections: Reflections): Map<String, List<CommandLineTool>> {
         val classes = reflections.getSubTypesOf(CommandLineTool::class.java)
 
         val tools = mutableMapOf<String, MutableList<CommandLineTool>>()
