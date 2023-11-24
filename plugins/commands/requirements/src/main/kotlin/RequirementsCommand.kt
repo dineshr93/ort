@@ -20,6 +20,10 @@
 package org.ossreviewtoolkit.plugins.commands.requirements
 
 import com.github.ajalt.clikt.core.ProgramResult
+import com.github.ajalt.clikt.parameters.options.default
+import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.options.split
+import com.github.ajalt.clikt.parameters.types.enum
 import com.github.ajalt.mordant.rendering.Theme
 
 import java.io.File
@@ -53,12 +57,19 @@ class RequirementsCommand : OrtCommand(
     name = "requirements",
     help = "Check for the command line tools required by ORT."
 ) {
+    private enum class RequirementsType { PLUGINS, COMMANDS }
+
+    private val list by option(
+        "--list", "-l",
+        help = "A comma-separated list of requirements to list."
+    ).enum<RequirementsType>().split(",").default(RequirementsType.entries)
+
     override fun run() {
         val reflections = Reflections("org.ossreviewtoolkit", Scanners.SubTypes)
 
-        listPlugins(reflections)
+        if (RequirementsType.PLUGINS in list) listPlugins(reflections)
 
-        val statusCode = checkToolVersions(reflections)
+        val statusCode = if (RequirementsType.COMMANDS in list) checkToolVersions(reflections) else 0
 
         echo("Prefix legend:")
         echo("${DANGER_PREFIX}The tool was not found in the PATH environment.")
